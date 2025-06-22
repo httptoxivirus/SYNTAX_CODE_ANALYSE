@@ -16,7 +16,15 @@ typedef enum {
     TOKEN_RPAREN,    // )
     TOKEN_LBRACE,    // {
     TOKEN_RBRACE,    // }
-    TOKEN_IF_KEYWORD
+    TOKEN_IF_KEYWORD,
+    TOKEN_WHILE_KEYWORD, // New: while keyword
+    TOKEN_PLUS,          // New: + operator
+    TOKEN_MINUS,         // New: - operator
+    TOKEN_MULTIPLY,      // New: * operator
+    TOKEN_DIVIDE,        // New: / operator
+    TOKEN_EQ_OP,         // New: == operator
+    TOKEN_LT_OP,         // New: < operator
+    TOKEN_GT_OP          // New: > operator
 } TokenType;
 
 typedef struct {
@@ -67,6 +75,8 @@ Token get_next_token() {
             token.type = TOKEN_INT_KEYWORD;
         } else if (strcmp(token.lexeme, "if") == 0) {
             token.type = TOKEN_IF_KEYWORD;
+        } else if (strcmp(token.lexeme, "while") == 0) { // New: while keyword
+            token.type = TOKEN_WHILE_KEYWORD;
         } else {
             token.type = TOKEN_IDENTIFIER;
         }
@@ -88,8 +98,14 @@ Token get_next_token() {
     // Operators and Punctuation
     switch (c) {
         case '=':
-            token.type = TOKEN_ASSIGN_OP;
-            strcpy(token.lexeme, "=");
+            if (input_code[current_pos + 1] == '=') { // Check for '=='
+                token.type = TOKEN_EQ_OP;
+                strcpy(token.lexeme, "==");
+                current_pos++; // Consume the second '='
+            } else {
+                token.type = TOKEN_ASSIGN_OP;
+                strcpy(token.lexeme, "=");
+            }
             break;
         case ';':
             token.type = TOKEN_SEMICOLON;
@@ -111,6 +127,30 @@ Token get_next_token() {
             token.type = TOKEN_RBRACE;
             strcpy(token.lexeme, "}");
             break;
+        case '+': // New: +
+            token.type = TOKEN_PLUS;
+            strcpy(token.lexeme, "+");
+            break;
+        case '-': // New: -
+            token.type = TOKEN_MINUS;
+            strcpy(token.lexeme, "-");
+            break;
+        case '*': // New: *
+            token.type = TOKEN_MULTIPLY;
+            strcpy(token.lexeme, "*");
+            break;
+        case '/': // New: /
+            token.type = TOKEN_DIVIDE;
+            strcpy(token.lexeme, "/");
+            break;
+        case '<': // New: <
+            token.type = TOKEN_LT_OP;
+            strcpy(token.lexeme, "<");
+            break;
+        case '>': // New: >
+            token.type = TOKEN_GT_OP;
+            strcpy(token.lexeme, ">");
+            break;
         default:
             token.type = TOKEN_ERROR;
             token.lexeme[0] = c;
@@ -118,7 +158,7 @@ Token get_next_token() {
             fprintf(stderr, "Lexical Error: Unexpected character '%c' at position %d\n", c, current_pos);
             break;
     }
-    current_pos++; // Consume the character
+    current_pos++; // Consume the character (or first character of a two-character operator like '==')
     return token;
 }
 
@@ -126,8 +166,8 @@ Token get_next_token() {
 
 // Error reporting function
 void syntax_error(const char *expected_str) {
-    fprintf(stderr, "Syntax Error: Expected %s, but found '%s' (Type: %d) at position %d\n",
-            expected_str, current_token.lexeme, current_token.type, current_pos - strlen(current_token.lexeme));
+    fprintf(stderr, "Syntax Error: Expected %s, but found '%s' (Type: %d) at position %zu\n", // Changed %d to %zu
+            expected_str, current_token.lexeme, current_token.type, (size_t)current_pos - strlen(current_token.lexeme)); // Cast current_pos to size_t
     exit(1); // Exit on first error for simplicity
 }
 
@@ -140,12 +180,17 @@ void match(TokenType expected_type, const char *expected_str) {
     }
 }
 
-// Forward declarations for recursive descent
+// Forward declarations for recursive descent functions (new expression rules and while loop)
 void program();
 void declaration();
 void statement();
 void expression();
+void comparison_expression();
+void additive_expression();
+void multiplicative_expression();
+void primary_expression();
 void block();
+void while_statement(); // New: while statement function
 
 // rule: program -> (declaration | statement)* EOF
 void program() {
@@ -154,7 +199,9 @@ void program() {
     while (current_token.type != TOKEN_EOF) {
         if (current_token.type == TOKEN_INT_KEYWORD) {
             declaration();
-        } else if (current_token.type == TOKEN_IDENTIFIER || current_token.type == TOKEN_IF_KEYWORD) {
+        } else if (current_token.type == TOKEN_IDENTIFIER ||
+                   current_token.type == TOKEN_IF_KEYWORD ||
+                   current_token.type == TOKEN_WHILE_KEYWORD) { // New: Check for while keyword
             statement();
         } else {
             syntax_error("a declaration or a statement");
@@ -171,38 +218,98 @@ void declaration() {
     printf("Parsed: Declaration\n");
 }
 
-// rule: statement -> assignment_statement | if_statement
+// rule: statement -> assignment_statement | if_statement | while_statement
 // rule: assignment_statement -> IDENTIFIER '=' expression ';'
 // rule: if_statement -> 'if' '(' expression ')' block
+// rule: while_statement -> 'while' '(' expression ')' block
 void statement() {
     if (current_token.type == TOKEN_IDENTIFIER) { // Assignment statement
         match(TOKEN_IDENTIFIER, "an identifier for assignment");
         match(TOKEN_ASSIGN_OP, "an assignment operator '='");
-        expression();
+        expression(); // Expression can now be more complex
         match(TOKEN_SEMICOLON, "a semicolon ';'");
         printf("Parsed: Assignment Statement\n");
     } else if (current_token.type == TOKEN_IF_KEYWORD) { // If statement
         match(TOKEN_IF_KEYWORD, "'if' keyword");
         match(TOKEN_LPAREN, "an opening parenthesis '('");
-        expression(); // Condition
+        expression(); // Condition is now a full expression
         match(TOKEN_RPAREN, "a closing parenthesis ')'");
         block();      // Body of the if statement
         printf("Parsed: If Statement\n");
+    } else if (current_token.type == TOKEN_WHILE_KEYWORD) { // New: While statement
+        while_statement();
     } else {
-        syntax_error("an assignment statement or an if statement");
+        syntax_error("an assignment statement, an if statement, or a while statement");
     }
 }
 
-// rule: expression -> IDENTIFIER | NUMBER
+// New: rule: while_statement -> 'while' '(' expression ')' block
+void while_statement() {
+    match(TOKEN_WHILE_KEYWORD, "'while' keyword");
+    match(TOKEN_LPAREN, "an opening parenthesis '('");
+    expression(); // Condition
+    match(TOKEN_RPAREN, "a closing parenthesis ')'");
+    block();      // Body of the while statement
+    printf("Parsed: While Statement\n");
+}
+
+// New: rule: expression -> comparison_expression
 void expression() {
+    comparison_expression();
+    // No explicit printf here, as expression is a recursive definition base
+}
+
+// New: rule: comparison_expression -> additive_expression ( ( '==' | '<' | '>' ) additive_expression )*
+void comparison_expression() {
+    additive_expression();
+    while (current_token.type == TOKEN_EQ_OP ||
+           current_token.type == TOKEN_LT_OP ||
+           current_token.type == TOKEN_GT_OP) {
+        TokenType op_type = current_token.type; // Store operator type
+        match(op_type, "a comparison operator (==, <, or >)");
+        additive_expression();
+        printf("Parsed: Comparison Operation\n");
+    }
+}
+
+// New: rule: additive_expression -> multiplicative_expression ( ( '+' | '-' ) multiplicative_expression )*
+void additive_expression() {
+    multiplicative_expression();
+    while (current_token.type == TOKEN_PLUS || current_token.type == TOKEN_MINUS) {
+        TokenType op_type = current_token.type; // Store operator type
+        match(op_type, "an additive operator (+ or -)");
+        multiplicative_expression();
+        printf("Parsed: Additive Operation\n");
+    }
+}
+
+// New: rule: multiplicative_expression -> primary_expression ( ( '*' | '/' ) primary_expression )*
+void multiplicative_expression() {
+    primary_expression();
+    while (current_token.type == TOKEN_MULTIPLY || current_token.type == TOKEN_DIVIDE) {
+        TokenType op_type = current_token.type; // Store operator type
+        match(op_type, "a multiplicative operator (* or /)");
+        primary_expression();
+        printf("Parsed: Multiplicative Operation\n");
+    }
+}
+
+// New: rule: primary_expression -> IDENTIFIER | NUMBER | '(' expression ')'
+void primary_expression() {
     if (current_token.type == TOKEN_IDENTIFIER) {
-        match(TOKEN_IDENTIFIER, "an identifier for expression");
+        match(TOKEN_IDENTIFIER, "an identifier");
+        printf("Parsed: Identifier in Expression\n");
     } else if (current_token.type == TOKEN_NUMBER) {
         match(TOKEN_NUMBER, "a number literal");
+        printf("Parsed: Number in Expression\n");
+    } else if (current_token.type == TOKEN_LPAREN) {
+        match(TOKEN_LPAREN, "an opening parenthesis '('");
+        expression(); // Recursive call for nested expressions
+        match(TOKEN_RPAREN, "a closing parenthesis ')'");
+        printf("Parsed: Parenthesized Expression\n");
     } else {
-        syntax_error("an identifier or a number");
+        syntax_error("an identifier, a number, or an opening parenthesis '(' for an expression");
     }
-    printf("Parsed: Expression\n");
 }
 
 // rule: block -> '{' (declaration | statement)* '}'
@@ -211,7 +318,9 @@ void block() {
     while (current_token.type != TOKEN_RBRACE && current_token.type != TOKEN_EOF) {
         if (current_token.type == TOKEN_INT_KEYWORD) {
             declaration();
-        } else if (current_token.type == TOKEN_IDENTIFIER || current_token.type == TOKEN_IF_KEYWORD) {
+        } else if (current_token.type == TOKEN_IDENTIFIER ||
+                   current_token.type == TOKEN_IF_KEYWORD ||
+                   current_token.type == TOKEN_WHILE_KEYWORD) { // New: Check for while keyword
             statement();
         } else {
             syntax_error("a declaration, a statement, or a closing brace '}'");
@@ -223,28 +332,49 @@ void block() {
 
 // --- Main Function ---
 int main() {
-    // Example C code to analyze
-    // This is a minimal subset for demonstration.
-    // Try uncommenting lines with errors to see the error reporting.
-    const char *code =
-        "int x;\n"
-        "x = 10;\n"
-        "if (x) {\n"
-        "    int y;\n"
-        "    y = 5;\n"
-        "}\n"
-        "int z;\n";
-        //"int ; // Error: missing identifier\n"
-        //"a = ; // Error: missing expression\n"
-        //"if (1 { } // Error: missing ')'\n"
-        //"int func() { return 0; } // Not supported by this parser\n";
+    // Define a buffer size for user input.
+    // Increased MAX_INPUT_SIZE to accommodate more complex code.
+    #define MAX_INPUT_SIZE 2048
 
-    input_code = (char *)malloc(strlen(code) + 1);
+    printf("Enter your C code to analyze (max %d characters).\n", MAX_INPUT_SIZE - 1);
+    printf("Press Enter twice after typing your code, or press Ctrl+Z (Windows) / Ctrl+D (Unix/Linux) and then Enter to signal end of input:\n");
+    printf("--------------------------------------------------------------------------------\n");
+
+    // Read input from the user line by line until an empty line or EOF
+    size_t total_length = 0;
+    char line_buffer[256]; // Buffer for each line read
+
+    // Allocate initial memory for input_code.
+    input_code = (char *)malloc(MAX_INPUT_SIZE);
     if (input_code == NULL) {
-        fprintf(stderr, "Memory allocation failed.\n");
+        fprintf(stderr, "Memory allocation failed for input_code.\n");
         return 1;
     }
-    strcpy(input_code, code);
+    input_code[0] = '\0'; // Initialize as empty string
+
+    while (fgets(line_buffer, sizeof(line_buffer), stdin) != NULL) {
+        // Check for an empty line to signify end of input
+        if (strcmp(line_buffer, "\n") == 0 || strcmp(line_buffer, "\r\n") == 0) {
+            break;
+        }
+
+        // Check if adding the new line would exceed MAX_INPUT_SIZE
+        if (total_length + strlen(line_buffer) >= MAX_INPUT_SIZE) {
+            fprintf(stderr, "Input too long. Truncating to %d characters.\n", MAX_INPUT_SIZE - 1);
+            break;
+        }
+
+        // Concatenate the read line to the input_code buffer
+        strcat(input_code, line_buffer);
+        total_length += strlen(line_buffer);
+    }
+
+    printf("\n--------------------------------------------------------------------------------\n");
+    printf("Analyzing the following code:\n%s\n", input_code);
+    printf("--------------------------------------------------------------------------------\n\n");
+
+    // Reset current_pos for the new input
+    current_pos = 0;
 
     printf("Starting syntax analysis...\n\n");
     program(); // Start the parsing process
